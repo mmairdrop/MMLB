@@ -3,9 +3,9 @@
   "name": "treasure-mlbb-id-checker",
   "version": "1.0.0",
   "description": "Treasure MLBB ID Checker Telegram Bot",
-  "main": "Bot.js",
+  "main": "bot.js",
   "scripts": {
-    "start": "node Bot.js"
+    "start": "node bot.js"
   },
   "dependencies": {
     "node-telegram-bot-api": "^0.66.0",
