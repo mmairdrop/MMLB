@@ -30,40 +30,30 @@ async function fetchMlbbData(userId, zoneId) {
         const response = await axios.post('https://api.viphub.id/api/v1/game/mobile-legends/check', {
             id: userId,
             zone: zoneId
-        }, { timeout: 5000 });
+        }, { timeout: 7000 });
 
         if (response.data && response.data.status) {
             return {
                 nickname: response.data.data.username || response.data.data.nickname,
-                country: response.data.data.region || 'Unknown'
+                country: response.data.data.region || 'Myanmar'
             };
         }
     } catch (e) {
-        console.log('Primary API failed. Switching to Backup API...');
+        console.log('Primary API failed:', e.message);
     }
-
-    try {
-        const response = await axios.get(`https://api.elixir.my.id/api/mlbb?id=${userId}&zone=${zoneId}`, { timeout: 5000 });
-        if (response.data && response.data.result) {
-            return {
-                nickname: response.data.result.username || response.data.result.nickname,
-                country: 'N/A (Backup API)'
-            };
-        }
-    } catch (e) {
-        console.log('Backup API failed:', e.message);
-    }
-
     return null;
 }
 
+// Handle both text messages and photo captions
 bot.on('message', async (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
-    const text = msg.text ? msg.text.trim() : '';
+    const text = msg.text || msg.caption || '';
 
-    if (text === '/start') {
-        return bot.sendMessage(chatId, `မင်္ဂလာပါ! MLBB ID စစ်ဆေးရန် \`12345678(1234)\` ပုံစံဖြင့် စာပို့ပေးပါ။`, { parse_mode: 'Markdown' });
+    if (!text) return;
+
+    if (text.trim() === '/start') {
+        return bot.sendMessage(chatId, `မင်္ဂလာပါ! MLBB ID စစ်ဆေးရန် ID နှင့် Zone ကို ပို့ပေးပါ။ စာသားများကြားထဲတွင်ဖြစ်စေ၊ ပုံနှင့်တွဲ၍ဖြစ်စေ ID ၅ ခုအထိ တခါတည်း ပို့စစ်နိုင်ပါသည်။`, { parse_mode: 'Markdown' });
     }
 
     if (text.startsWith('/settemplate')) {
@@ -78,39 +68,45 @@ bot.on('message', async (msg) => {
         return bot.sendMessage(chatId, '✅ စာသားနှင့် Emoji ပုံစံကို အောင်မြင်စွာ ပြောင်းလဲပြီးပါပြီ။');
     }
 
-    const match = text.match(/^(\d+)[(\s]+(\d+)\)?$/);
-    if (match) {
-        const gameId = match[1];
-        const zoneId = match[2];
+    // Flexible Regex to find up to 5 IDs (handles surrounding text, spaces, and brackets like 12345678(1234))
+    const regex = /(\d{5,12})\s*[\(\（]\s*(\d{3,6})\s*[\)\）]/g;
+    const matches = [...text.matchAll(regex)].slice(0, 5);
 
-        const loadingMsg = await bot.sendMessage(chatId, '🔍 အချက်အလက်များ စစ်ဆေးနေပါသည်...');
-        const data = await fetchMlbbData(gameId, zoneId);
-        bot.deleteMessage(chatId, loadingMsg.message_id);
+    if (matches.length > 0) {
+        for (const match of matches) {
+            const gameId = match[1];
+            const zoneId = match[2];
 
-        if (!data) {
-            return bot.sendMessage(chatId, '❌ ID သို့မဟုတ် Zone ID မှားယွင်းနေပါသည်/ API အလုပ်မလုပ်ပါ။');
+            const loadingMsg = await bot.sendMessage(chatId, `🔍 စစ်ဆေးနေသည်: ${gameId}(${zoneId})...`);
+            const data = await fetchMlbbData(gameId, zoneId);
+            bot.deleteMessage(chatId, loadingMsg.message_id);
+
+            if (!data) {
+                await bot.sendMessage(chatId, `❌ ID: ${gameId}(${zoneId}) သည် မှားယွင်းနေပါသည် သို့မဟုတ် API ချိတ်ဆက်၍ မရပါ။`);
+                continue;
+            }
+
+            let replyText = botTemplates.checkResult
+                .replace('{nickname}', data.nickname)
+                .replace('{userId}', gameId)
+                .replace('{zoneId}', zoneId)
+                .replace('{country}', data.country);
+
+            const inlineKeyboard = [
+                [{ text: '✅ ID မှန်ကန်ကြောင်း အတည်ပြုရန်', callback_data: `confirm_${gameId}_${zoneId}` }]
+            ];
+
+            if (ADMIN_IDS.includes(userId)) {
+                inlineKeyboard.push([
+                    { text: '📋 Copy ID', callback_data: `copy_id_${gameId}` },
+                    { text: '📋 Copy Zone', callback_data: `copy_zone_${zoneId}` }
+                ]);
+            }
+
+            await bot.sendMessage(chatId, replyText, {
+                reply_markup: { inline_keyboard: inlineKeyboard }
+            });
         }
-
-        let replyText = botTemplates.checkResult
-            .replace('{nickname}', data.nickname)
-            .replace('{userId}', gameId)
-            .replace('{zoneId}', zoneId)
-            .replace('{country}', data.country);
-
-        const inlineKeyboard = [
-            [{ text: '✅ ID မှန်ကန်ကြောင်း အတည်ပြုရန်', callback_data: `confirm_${gameId}_${zoneId}` }]
-        ];
-
-        if (ADMIN_IDS.includes(userId)) {
-            inlineKeyboard.push([
-                { text: '📋 Copy ID', callback_data: `copy_id_${gameId}` },
-                { text: '📋 Copy Zone', callback_data: `copy_zone_${zoneId}` }
-            ]);
-        }
-
-        bot.sendMessage(chatId, replyText, {
-            reply_markup: { inline_keyboard: inlineKeyboard }
-        });
     }
 });
 
@@ -135,7 +131,7 @@ bot.on('callback_query', async (query) => {
 
     if (data.startsWith('copy_zone_')) {
         if (!ADMIN_IDS.includes(userId)) {
-            return bot.answerCallbackQuery(query.id, { text: '❌ Admin/Owner သသာ Copy ကူးနိုင်ပါသည်။', show_alert: true });
+            return bot.answerCallbackQuery(query.id, { text: `❌ Admin/Owner သာ Copy ကူးနိုင်ပါသည်။`, show_alert: true });
         }
         const copyZone = data.replace('copy_zone_', '');
         bot.answerCallbackQuery(query.id, { text: `Zone: ${copyZone}`, show_alert: false });
