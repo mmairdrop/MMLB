@@ -2,6 +2,7 @@
 const TelegramBot = require('node-telegram-bot-api');
 const axios = require('axios');
 const express = require('express');
+const crypto = require('crypto');
 
 // =====================================
 // CONFIGURATION
@@ -9,7 +10,6 @@ const express = require('express');
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const ADMIN_IDS = [1006058484, 8003687808];
-
 const PORT = process.env.PORT || 3000;
 
 if (!BOT_TOKEN) {
@@ -22,11 +22,11 @@ const bot = new TelegramBot(BOT_TOKEN, {
 
 const app = express();
 
-app.get('/', (req, res) => {
-    res.status(200).send('MLBB ID Checker Bot is Running!');
+app.get('/', (_req, res) => {
+    res.status(200).send('💜 Treasure MLBB ID Checker is Running!');
 });
 
-app.get('/health', (req, res) => {
+app.get('/health', (_req, res) => {
     res.status(200).json({ status: 'ok' });
 });
 
@@ -40,7 +40,7 @@ app.listen(PORT, () => {
 
 let botTemplates = {
     checkResult:
-        '👋 Nickname: {nickname}\n\n' +
+        '👑 Nickname: {nickname}\n\n' +
         '🆔 User ID: {userId} 🌐 {zoneId}\n' +
         '🌍 Country: {country}\n\n' +
         '⚠️ Nickname နဲ့ ID ကို သေချာစစ်ဆေးပါ။',
@@ -93,7 +93,7 @@ async function fetchMlbbData(gameId, zoneId) {
                 result.region ||
                 result.data?.country ||
                 result.data?.region ||
-                'မရရှိပါ';
+                'Myanmar (Burma)';
 
             return {
                 status: 'valid',
@@ -102,19 +102,14 @@ async function fetchMlbbData(gameId, zoneId) {
             };
         }
 
-        if (
-            result &&
-            result.success === false
-        ) {
+        if (result && result.success === false) {
             return {
                 status: 'invalid',
                 message: result.message || 'Player not found'
             };
         }
 
-        return {
-            status: 'error'
-        };
+        return { status: 'error' };
 
     } catch (error) {
         console.error(
@@ -124,9 +119,7 @@ async function fetchMlbbData(gameId, zoneId) {
             error.message
         );
 
-        return {
-            status: 'error'
-        };
+        return { status: 'error' };
     }
 }
 
@@ -148,49 +141,94 @@ async function safeDeleteMessage(chatId, messageId) {
     } catch (_) {}
 }
 
-function makeCopyKeyboard(gameId, zoneId, ownerId) {
+// Keep callback data short and associate it with the correct customer.
+const pendingChecks = new Map();
+
+function createCheckToken(gameId, zoneId, ownerId) {
+    const token = crypto.randomBytes(8).toString('hex');
+
+    pendingChecks.set(token, {
+        gameId: String(gameId),
+        zoneId: String(zoneId),
+        ownerId: Number(ownerId),
+        confirmed: false
+    });
+
+    // Avoid unlimited memory growth.
+    if (pendingChecks.size > 5000) {
+        const oldestToken = pendingChecks.keys().next().value;
+        pendingChecks.delete(oldestToken);
+    }
+
+    return token;
+}
+
+function makeCopyKeyboard(gameId, zoneId, token) {
     return {
         inline_keyboard: [
-            [{
-                text: '📋 Copy ID',
-                copy_text: {
-                    text: String(gameId)
+            [
+                {
+                    text: '📋 Copy ID',
+                    copy_text: { text: String(gameId) }
+                },
+                {
+                    text: '📋 Copy Zone',
+                    copy_text: { text: String(zoneId) }
                 }
-            }, {
-                text: '📋 Copy Zone',
-                copy_text: {
-                    text: String(zoneId)
+            ],
+            [
+                {
+                    text: '🔒 စစ်ဆေးမှု ပြီးဆုံးပါပြီ',
+                    callback_data: `done_${token}`
                 }
-            }],
-            [{
-                text: '🔒 စစ်ဆေးမှု ပြီးဆုံးပါပြီ',
-                callback_data: `done_${ownerId}`
-            }]
+            ]
         ]
     };
 }
 
-function makeResultKeyboard(gameId, zoneId, ownerId) {
+function makeResultKeyboard(gameId, zoneId, token) {
     return {
         inline_keyboard: [
-            [{
-                text: '✅ ID မှန်ကန်ကြောင်း အတည်ပြုရန်',
-                callback_data:
-                    `confirm_${gameId}_${zoneId}_${ownerId}`
-            }],
-            [{
-                text: '📋 Copy ID',
-                copy_text: {
-                    text: String(gameId)
+            [
+                {
+                    text: '✅ ID မှန်ကန်ကြောင်း အတည်ပြုရန်',
+                    callback_data: `confirm_${token}`
                 }
-            }, {
-                text: '📋 Copy Zone',
-                copy_text: {
-                    text: String(zoneId)
+            ],
+            [
+                {
+                    text: '📋 Copy ID',
+                    copy_text: { text: String(gameId) }
+                },
+                {
+                    text: '📋 Copy Zone',
+                    copy_text: { text: String(zoneId) }
                 }
-            }]
+            ]
         ]
     };
+}
+
+function makeResultText(gameId, zoneId, result) {
+    const template = botTemplates.checkResult;
+
+    const body = template
+        .replace(/\{nickname\}/g, () => result.nickname)
+        .replace(/\{userId\}/g, () => String(gameId))
+        .replace(/\{zoneId\}/g, () => String(zoneId))
+        .replace(/\{country\}/g, () => result.country);
+
+    return [
+        '╭━━━━━━━━━━━━━━━━━━╮',
+        '       💜 TREASURE 💜',
+        '       🎮 MLBB ID CHECKER',
+        '╰━━━━━━━━━━━━━━━━━━╯',
+        '',
+        body,
+        '',
+        '━━━━━━━━━━━━━━━━━━',
+        '✨ Treasure Game Shop ✨'
+    ].join('\n');
 }
 
 // =====================================
@@ -205,24 +243,38 @@ bot.on('message', async (msg) => {
     if (!text || !telegramUserId) return;
 
     // START COMMAND
-    if (text.trim() === '/start') {
-        return bot.sendMessage(
+    if (/^\/start(?:@\w+)?(?:\s|$)/.test(text.trim())) {
+        await bot.sendMessage(
             chatId,
-            'မင်္ဂလာပါ 💜 Treasure MLBB ID Checker မှ ကြိုဆိုပါတယ်။\n\n' +
-            'MLBB User ID နဲ့ Zone ID ကို အောက်ပါပုံစံအတိုင်း ပို့ပေးပါ။\n\n' +
-            'ဥပမာ - 667124253(8664)\n\n' +
-            'စာသားထဲမှာဖြစ်စေ၊ ပုံ Caption ထဲမှာဖြစ်စေ ' +
-            'ID ၅ ခုအထိ တစ်ခါတည်း စစ်နိုင်ပါတယ်။'
+            [
+                '╭━━━━━━━━━━━━━━━━━━╮',
+                '       💜 TREASURE 💜',
+                '       🎮 MLBB ID CHECKER',
+                '╰━━━━━━━━━━━━━━━━━━╯',
+                '',
+                '✨ မင်္ဂလာပါ။ ကြိုဆိုပါတယ်။',
+                '',
+                '🆔 MLBB User ID နဲ့ Zone ID ကို ပို့ပေးပါ။',
+                '',
+                '📝 ဥပမာ:',
+                '667124253(8664)',
+                '',
+                '📌 ID ၅ ခုအထိ တစ်ခါတည်း စစ်နိုင်ပါတယ်။',
+                '',
+                '💎 Treasure Game Shop 💎'
+            ].join('\n')
         );
+        return;
     }
 
     // SET RESULT TEMPLATE
-    if (text.startsWith('/settemplate')) {
+    if (/^\/settemplate(?:@\w+)?(?:\s|$)/.test(text)) {
         if (!ADMIN_IDS.includes(telegramUserId)) {
-            return bot.sendMessage(
+            await bot.sendMessage(
                 chatId,
                 '❌ Admin/Owner သာ အသုံးပြုနိုင်ပါသည်။'
             );
+            return;
         }
 
         const newTemplate = text
@@ -230,7 +282,7 @@ bot.on('message', async (msg) => {
             .trim();
 
         if (!newTemplate) {
-            return bot.sendMessage(
+            await bot.sendMessage(
                 chatId,
                 '📝 လက်ရှိ Result Template:\n\n' +
                 botTemplates.checkResult +
@@ -240,23 +292,26 @@ bot.on('message', async (msg) => {
                 'Zone: {zoneId}\n' +
                 'Country: {country}'
             );
+            return;
         }
 
         botTemplates.checkResult = newTemplate;
 
-        return bot.sendMessage(
+        await bot.sendMessage(
             chatId,
             '✅ Result Template ပြောင်းလဲပြီးပါပြီ။'
         );
+        return;
     }
 
     // SET CONFIRM TEMPLATE
-    if (text.startsWith('/setconfirm')) {
+    if (/^\/setconfirm(?:@\w+)?(?:\s|$)/.test(text)) {
         if (!ADMIN_IDS.includes(telegramUserId)) {
-            return bot.sendMessage(
+            await bot.sendMessage(
                 chatId,
                 '❌ Admin/Owner သာ အသုံးပြုနိုင်ပါသည်။'
             );
+            return;
         }
 
         const newTemplate = text
@@ -264,21 +319,23 @@ bot.on('message', async (msg) => {
             .trim();
 
         if (!newTemplate) {
-            return bot.sendMessage(
+            await bot.sendMessage(
                 chatId,
                 '📝 လက်ရှိ Confirm Template:\n\n' +
                 botTemplates.confirmMessage +
                 '\n\nပြောင်းရန်:\n' +
                 '/setconfirm မင်းလိုချင်တဲ့ စာသား'
             );
+            return;
         }
 
         botTemplates.confirmMessage = newTemplate;
 
-        return bot.sendMessage(
+        await bot.sendMessage(
             chatId,
             '✅ Confirm Template ပြောင်းလဲပြီးပါပြီ။'
         );
+        return;
     }
 
     // FIND UP TO 5 USER IDs
@@ -298,7 +355,7 @@ bot.on('message', async (msg) => {
         try {
             loadingMsg = await bot.sendMessage(
                 chatId,
-                `🔍 စစ်ဆေးနေသည်: ${gameId}(${zoneId})...`
+                `🔍 ID စစ်ဆေးနေပါတယ်...\n\n🆔 ${gameId}\n🌐 Zone: ${zoneId}\n⏳ ခဏစောင့်ပေးပါ။`
             );
 
             const result = await fetchMlbbData(gameId, zoneId);
@@ -311,9 +368,17 @@ bot.on('message', async (msg) => {
             if (result.status === 'error') {
                 await bot.sendMessage(
                     chatId,
-                    `⚠️ ID: ${gameId}(${zoneId}) ကို လောလောဆယ် ` +
-                    'စစ်ဆေး၍မရပါ။ API ချိတ်ဆက်မှုကို စစ်ဆေးပြီး ' +
-                    'ခဏနေမှ ပြန်စမ်းပါ။'
+                    [
+                        '╭━━━━━━━━━━━━━━━━━━╮',
+                        '       ⚠️ CHECK ERROR',
+                        '╰━━━━━━━━━━━━━━━━━━╯',
+                        '',
+                        `🆔 ID: ${gameId}`,
+                        `🌐 Zone: ${zoneId}`,
+                        '',
+                        'လောလောဆယ် စစ်ဆေး၍မရပါ။',
+                        'ခဏနေမှ ပြန်စမ်းပေးပါ။'
+                    ].join('\n')
                 );
                 continue;
             }
@@ -321,18 +386,32 @@ bot.on('message', async (msg) => {
             if (result.status === 'invalid') {
                 await bot.sendMessage(
                     chatId,
-                    `❌ ID: ${gameId}(${zoneId}) ကို API က ရှာမတွေ့ပါ။\n` +
-                    'User ID နဲ့ Zone ID ကို ပြန်စစ်ပေးပါ။'
+                    [
+                        '╭━━━━━━━━━━━━━━━━━━╮',
+                        '       ❌ INVALID ID',
+                        '╰━━━━━━━━━━━━━━━━━━╯',
+                        '',
+                        `🆔 ID: ${gameId}`,
+                        `🌐 Zone: ${zoneId}`,
+                        '',
+                        'Player ကို API က ရှာမတွေ့ပါ။',
+                        'ID နဲ့ Zone ကို ပြန်စစ်ပေးပါ။'
+                    ].join('\n')
                 );
                 continue;
             }
 
-            // BUILD RESULT MESSAGE
-            const replyText = botTemplates.checkResult
-                .replace(/\{nickname\}/g, result.nickname)
-                .replace(/\{userId\}/g, gameId)
-                .replace(/\{zoneId\}/g, zoneId)
-                .replace(/\{country\}/g, result.country);
+            const token = createCheckToken(
+                gameId,
+                zoneId,
+                telegramUserId
+            );
+
+            const replyText = makeResultText(
+                gameId,
+                zoneId,
+                result
+            );
 
             await bot.sendMessage(
                 chatId,
@@ -341,13 +420,16 @@ bot.on('message', async (msg) => {
                     reply_markup: makeResultKeyboard(
                         gameId,
                         zoneId,
-                        telegramUserId
+                        token
                     )
                 }
             );
 
         } catch (error) {
-            console.error('Message handler error:', error.message);
+            console.error(
+                'Message handler error:',
+                error.message
+            );
 
             if (loadingMsg) {
                 await safeDeleteMessage(
@@ -371,75 +453,102 @@ bot.on('message', async (msg) => {
 bot.on('callback_query', async (query) => {
     const chatId = query.message?.chat?.id;
     const messageId = query.message?.message_id;
-    const telegramUserId = query.from.id;
+    const telegramUserId = query.from?.id;
     const data = query.data || '';
 
-    if (!chatId || !messageId) {
-        return safeAnswerCallback(query.id);
+    if (!chatId || !messageId || !telegramUserId) {
+        await safeAnswerCallback(query.id);
+        return;
     }
 
     // CONFIRM ID
     if (data.startsWith('confirm_')) {
-        const parts = data.split('_');
+        const token = data.slice('confirm_'.length);
+        const check = pendingChecks.get(token);
 
-        const gameId = parts[1];
-        const zoneId = parts[2];
-        const ownerId = Number(parts[3]);
+        if (!check) {
+            await safeAnswerCallback(query.id, {
+                text: '⚠️ စစ်ဆေးမှု သက်တမ်းကုန်သွားပါပြီ။ ID ကို ပြန်ပို့ပါ။',
+                show_alert: true
+            });
+            return;
+        }
 
-        if (ownerId !== telegramUserId) {
-            return safeAnswerCallback(query.id, {
+        if (check.ownerId !== telegramUserId) {
+            await safeAnswerCallback(query.id, {
                 text: '❌ ဒီ ID ကို စစ်ဆေးခဲ့တဲ့ Customer သာ အတည်ပြုနိုင်ပါတယ်။',
                 show_alert: true
             });
+            return;
         }
+
+        if (check.confirmed) {
+            await safeAnswerCallback(query.id, {
+                text: '✅ အတည်ပြုပြီးသား ဖြစ်ပါတယ်။'
+            });
+            return;
+        }
+
+        check.confirmed = true;
 
         await safeAnswerCallback(query.id, {
             text: '✅ ID အတည်ပြုပြီးပါပြီ။'
         });
 
         const oldText = query.message.text || '';
+        const warning = '⚠️ Nickname နဲ့ ID ကို သေချာစစ်ဆေးပါ။';
 
-        const updatedText = oldText.replace(
-            '⚠️ Nickname နဲ့ ID ကို သေချာစစ်ဆေးပါ။',
-            '✅ ID မှန်ကန်ကြောင်း အတည်ပြုပြီးပါပြီ။'
-        );
+        const updatedText = oldText.includes(warning)
+            ? oldText.replace(
+                warning,
+                '✅ ID မှန်ကန်ကြောင်း အတည်ပြုပြီးပါပြီ။'
+            )
+            : oldText + '\n\n✅ ID မှန်ကန်ကြောင်း အတည်ပြုပြီးပါပြီ။';
 
-        // CONFIRM BUTTON DISAPPEARS.
-        // COPY BUTTONS REMAIN.
         try {
+            // Edit the existing result message.
+            // Keep Copy ID / Copy Zone buttons.
             await bot.editMessageText(updatedText, {
                 chat_id: chatId,
                 message_id: messageId,
                 reply_markup: makeCopyKeyboard(
-                    gameId,
-                    zoneId,
-                    ownerId
+                    check.gameId,
+                    check.zoneId,
+                    token
                 )
             });
+
         } catch (error) {
-            console.error('Confirm edit error:', error.message);
+            console.error(
+                'Confirm edit error:',
+                error.message
+            );
         }
 
-        // DO NOT SEND A NEW MESSAGE HERE.
+        // Do not send a second confirmation message.
         return;
     }
 
+    // FINISH BUTTON
     if (data.startsWith('done_')) {
-        const ownerId = Number(data.split('_')[1]);
+        const token = data.slice('done_'.length);
+        const check = pendingChecks.get(token);
 
-        if (ownerId !== telegramUserId) {
-            return safeAnswerCallback(query.id, {
-                text: '❌ ဒီခလုတ်ကို စစ်ဆေးခဲ့တဲ့ Customer သာ အသုံးပြုနိုင်ပါတယ်။',
+        if (!check || check.ownerId !== telegramUserId) {
+            await safeAnswerCallback(query.id, {
+                text: '❌ ဒီခလုတ်ကို အသုံးပြုခွင့်မရှိပါ။',
                 show_alert: true
             });
+            return;
         }
 
-        return safeAnswerCallback(query.id, {
-            text: 'အတည်ပြုပြီးပါပြီ။'
+        await safeAnswerCallback(query.id, {
+            text: '💜 ပြီးဆုံးပါပြီ။'
         });
+        return;
     }
 
-    return safeAnswerCallback(query.id);
+    await safeAnswerCallback(query.id);
 });
 
 // =====================================
@@ -447,7 +556,10 @@ bot.on('callback_query', async (query) => {
 // =====================================
 
 bot.on('polling_error', (error) => {
-    console.error('Telegram polling error:', error.message);
+    console.error(
+        'Telegram polling error:',
+        error.message
+    );
 });
 
 process.on('unhandledRejection', (error) => {
@@ -457,3 +569,5 @@ process.on('unhandledRejection', (error) => {
 process.on('uncaughtException', (error) => {
     console.error('Uncaught exception:', error);
 });
+
+console.log('💜 Treasure MLBB ID Checker started!');
