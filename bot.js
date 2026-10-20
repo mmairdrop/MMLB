@@ -46,14 +46,14 @@ server.keepAliveTimeout = 5000;
 
 let botTemplates = {
     checkResult:
-        '👤 Nickname: {nickname}\n' +
+        '😎 Nickname: {nickname}\n' +
         '🆔 ID: {userId} ({zoneId})\n' +
         '🌍 Region: {country}\n\n' +
         '⚠️ Nickname နဲ့ ID ကို စစ်ဆေးပါ။',
 
     confirmMessage:
         '✅ ID မှန်ကန်ကြောင်း အတည်ပြုပြီးပါပြီ။\n' +
-        '🔜 ငွေလွှဲပြေစာရောက်ပြီး 5min မှ 10min အတွင်း ' +
+        'ငွေလွှဲပြေစာရောက်ပြီး 5min မှ 10min အတွင်း ထည့်ပေးပါမယ်\n' 
         'ထည့်ပေးပါမယ်။\n\n' +
         'ဝယ်ယူအားပေးမှုအတွက် ကျေးဇူးတင်ပါတယ်ရှင့် 💜'
 };
