@@ -4,7 +4,7 @@ const axios = require('axios');
 const express = require('express');
 
 // ==================================================
-// TreasureGameShop - Mobile Legends ID Checker
+// TreasureGameShop - MLBB ID Checker
 // Render Webhook + Health Check
 // ==================================================
 
@@ -16,23 +16,17 @@ const WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET || '';
 
 const ADMIN_IDS = [1006058484, 8003687808];
 
-if (!BOT_TOKEN) {
-  throw new Error('BOT_TOKEN Environment Variable မရှိပါ။');
-}
-
+if (!BOT_TOKEN) throw new Error('BOT_TOKEN မရှိပါ။');
 if (!/^https:\/\/.+/i.test(RENDER_URL)) {
-  throw new Error('RENDER_EXTERNAL_URL မရှိပါ။ Render URL ကို စစ်ပါ။');
+  throw new Error('RENDER_EXTERNAL_URL မရှိပါ။');
 }
-
 if (!/^[A-Za-z0-9_-]{16,128}$/.test(WEBHOOK_PATH)) {
-  throw new Error('WEBHOOK_PATH ကို 16-128 characters သတ်မှတ်ပါ။');
+  throw new Error('WEBHOOK_PATH ကို စစ်ပါ။');
 }
-
 if (!/^[A-Za-z0-9_-]{1,256}$/.test(WEBHOOK_SECRET)) {
-  throw new Error('TELEGRAM_WEBHOOK_SECRET မရှိပါ။');
+  throw new Error('TELEGRAM_WEBHOOK_SECRET ကို စစ်ပါ။');
 }
 
-// Telegram Bot: Webhook mode only
 const bot = new TelegramBot(BOT_TOKEN, { polling: false });
 const app = express();
 
@@ -41,7 +35,6 @@ app.use(express.json({ limit: '1mb' }));
 
 // ==================================================
 // Message templates
-// Admin can change these with /settemplate, /setconfirm
 // ==================================================
 
 let resultTemplate =
@@ -54,10 +47,28 @@ let confirmTemplate =
   '💜 Nickname: {{nickname}}\n' +
   '💜 ID: {{id}} ({{zone}})\n' +
   '💜 Region: {{region}}\n\n' +
-  '💖 ID အတည်ပြုပြီးပါပြီ 💜\n' +
+  '🩵 ID အတည်ပြုပြီးပါပြီ 🩵\n' +
   '⏳ 5 မိနစ်မှ 15 မိနစ်အတွင်း ထည့်ပေးပါတယ်ရှင့် 💜';
 
 const waitingAdminAction = new Map();
+
+// Prevent the same ID message from being processed twice
+// when Telegram redelivers a message update.
+const processedMessages = new Set();
+const MAX_PROCESSED_MESSAGES = 3000;
+
+function rememberMessage(key) {
+  if (processedMessages.has(key)) return false;
+
+  processedMessages.add(key);
+
+  if (processedMessages.size > MAX_PROCESSED_MESSAGES) {
+    const oldest = processedMessages.values().next().value;
+    processedMessages.delete(oldest);
+  }
+
+  return true;
+}
 
 // ==================================================
 // Template replacement
@@ -72,7 +83,7 @@ function applyTemplate(template, values) {
 }
 
 // ==================================================
-// Fetch MLBB nickname and region
+// Fetch MLBB data
 // ==================================================
 
 async function fetchMlbbData(gameId, zoneId) {
@@ -101,7 +112,7 @@ async function fetchMlbbData(gameId, zoneId) {
 
     return {
       success: false,
-      error: data.error || 'ID မမှန်ပါ၊ သို့မဟုတ် အချက်အလက် ရှာမတွေ့ပါ။'
+      error: data.error || 'ID အချက်အလက် ရှာမတွေ့ပါ။'
     };
   } catch (error) {
     console.error('MLBB API error:', error.message);
@@ -114,7 +125,7 @@ async function fetchMlbbData(gameId, zoneId) {
 }
 
 // ==================================================
-// Buttons
+// Inline keyboards
 // ==================================================
 
 function makeResultKeyboard(gameId, zoneId, ownerId) {
@@ -122,7 +133,7 @@ function makeResultKeyboard(gameId, zoneId, ownerId) {
     inline_keyboard: [
       [
         {
-          text: '💜 ID မှန်ကန်ပါတယ်',
+          text: '🩵 ID မှန်ကန်ပါတယ်',
           callback_data: `confirm|${gameId}|${zoneId}|${ownerId}`
         }
       ],
@@ -159,14 +170,16 @@ function makeCopyKeyboard(gameId, zoneId) {
 
 // ==================================================
 // Animated-style checking message
-// Emoji change while the ID is being checked
 // ==================================================
+
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 async function animateChecking(chatId, messageId) {
   const frames = [
     '💜 🔎 MLBB ID စစ်ဆေးနေပါတယ်...',
-    '💖 ✨ Nickname ရှာဖွေနေပါတယ်...',
-    '💜 🔍 Region စစ်ဆေးနေပါတယ်...'
+    '🩵 ✨ Nickname ရှာဖွေနေပါတယ်...',
+    '💜 🌏 Region စစ်ဆေးနေပါတယ်...',
+    '🩵 💫 ခဏလေး စောင့်ပေးပါရှင့်...'
   ];
 
   for (const frame of frames) {
@@ -175,20 +188,18 @@ async function animateChecking(chatId, messageId) {
         chat_id: chatId,
         message_id: messageId
       });
-
-      await new Promise(resolve => setTimeout(resolve, 450));
     } catch (error) {
-      // Telegram may reject an unchanged message.
-      // Continue checking instead of stopping the bot.
       if (!String(error.message).includes('message is not modified')) {
         console.error('Animation error:', error.message);
       }
     }
+
+    await sleep(350);
   }
 }
 
 // ==================================================
-// Health routes for Render and uptime monitoring
+// Render health routes
 // ==================================================
 
 app.get('/', (_req, res) => {
@@ -204,7 +215,7 @@ app.get('/health', (_req, res) => {
 });
 
 // ==================================================
-// Telegram Webhook
+// Telegram webhook
 // ==================================================
 
 const WEBHOOK_ROUTE = `/${WEBHOOK_PATH}`;
@@ -217,7 +228,7 @@ app.post(WEBHOOK_ROUTE, (req, res) => {
     return res.sendStatus(403);
   }
 
-  // Acknowledge Telegram immediately.
+  // Respond to Telegram immediately.
   res.sendStatus(200);
 
   Promise.resolve(bot.processUpdate(req.body)).catch(error => {
@@ -229,29 +240,30 @@ app.post(WEBHOOK_ROUTE, (req, res) => {
 // Handle incoming messages
 // ==================================================
 
-bot.on('message', async (msg) => {
+bot.on('message', async msg => {
   const chatId = msg.chat.id;
   const userId = msg.from && msg.from.id;
   const text = (msg.text || '').trim();
 
-  if (!text || !userId) return;
+  // Ignore messages without text and messages from channels/bots.
+  if (!text || !userId || msg.from.is_bot) return;
+
+  const command = text.split(/\s/)[0].split('@')[0];
 
   try {
-    // /start
-    if (/^\/start(?:@\w+)?(?:\s|$)/i.test(text)) {
+    // /start command
+    if (command === '/start') {
       await bot.sendMessage(
         chatId,
         '💖 Mobile legends id checker 💖\n\n' +
-        '💜 Game ID နဲ့ Zone ID ကို ပို့ပေးပါ။\n\n' +
+        '💜 Game ID နဲ့ Zone ID ကို ဒီပုံစံအတိုင်း ပို့ပေးပါ။\n\n' +
         '✨ ဥပမာ - 667124253 (8664)\n\n' +
-        '📣 Nickname နဲ့ ID ကို စစ်ဆေးပြီး အတည်ပြုပါ။'
+        '📣 Nickname နဲ့ ID ကို စစ်ဆေးပါ။'
       );
       return;
     }
 
     // Admin template commands
-    const command = text.split(/\s/)[0].split('@')[0];
-
     if (command === '/settemplate' || command === '/setconfirm') {
       if (!ADMIN_IDS.includes(userId)) {
         await bot.sendMessage(
@@ -269,13 +281,13 @@ bot.on('message', async (msg) => {
         action === 'result'
           ? 'Result template အသစ်ကို ပို့ပါ။\n' +
             'Fields: {{nickname}}, {{id}}, {{zone}}, {{region}}'
-          : 'Confirm template အသစ်ကို ပို့ပါ။\n' +
+          : 'Confirmation template အသစ်ကို ပို့ပါ။\n' +
             'Fields: {{nickname}}, {{id}}, {{zone}}, {{region}}'
       );
       return;
     }
 
-    // Save the next admin message as a template.
+    // Save next admin message as a template.
     if (ADMIN_IDS.includes(userId) && waitingAdminAction.has(userId)) {
       const action = waitingAdminAction.get(userId);
       waitingAdminAction.delete(userId);
@@ -285,13 +297,20 @@ bot.on('message', async (msg) => {
         await bot.sendMessage(chatId, '💜 Result template ပြောင်းပြီးပါပြီ။');
       } else {
         confirmTemplate = text;
-        await bot.sendMessage(chatId, '💖 Confirm template ပြောင်းပြီးပါပြီ။');
+        await bot.sendMessage(chatId, '🩵 Confirm template ပြောင်းပြီးပါပြီ။');
       }
       return;
     }
 
-    // Match ID + Zone in parentheses.
-    // Also accepts full-width parentheses and trailing text.
+    // IMPORTANT:
+    // If the message contains no valid MLBB ID + Zone,
+    // silently ignore it. Never reply to ordinary group chat.
+    //
+    // Accepts:
+    // 148132090 (2741)
+    // 148132090(2741)
+    // 148132090（2741）
+    // Also permits trailing text after a valid ID.
     const regex = /(\d{5,12})\s*[\(（]\s*(\d{3,6})\s*[\)）]/g;
     const entries = [];
     let match;
@@ -303,14 +322,13 @@ bot.on('message', async (msg) => {
       });
     }
 
-    if (entries.length === 0) {
-      await bot.sendMessage(
-        chatId,
-        '💗 ID ပုံစံမမှန်ပါ။\n\n' +
-        '✨ ဥပမာ - 667124253 (8664)'
-      );
-      return;
-    }
+    // This is the key fix: no ID means no reply.
+    if (entries.length === 0) return;
+
+    // Ignore duplicate delivery of the same Telegram message.
+    const messageKey = `${chatId}:${msg.message_id}`;
+
+    if (!rememberMessage(messageKey)) return;
 
     for (const entry of entries) {
       const { gameId, zoneId } = entry;
@@ -320,14 +338,11 @@ bot.on('message', async (msg) => {
         '💜 🔎 MLBB ID စစ်ဆေးနေပါတယ်...'
       );
 
-      // Animate the status while the lookup runs.
-      const animation = animateChecking(
-        chatId,
-        loadingMessage.message_id
-      );
-
-      const result = await fetchMlbbData(gameId, zoneId);
-      await animation;
+      // Run the lookup and status animation concurrently.
+      const [result] = await Promise.all([
+        fetchMlbbData(gameId, zoneId),
+        animateChecking(chatId, loadingMessage.message_id)
+      ]);
 
       if (!result.success) {
         await bot.editMessageText(
@@ -356,24 +371,30 @@ bot.on('message', async (msg) => {
       });
     }
   } catch (error) {
-    console.error('Message handler error:', error);
+    console.error('Message handler error:', error.message);
 
-    try {
-      await bot.sendMessage(
-        chatId,
-        '💔 အမှားတစ်ခု ဖြစ်သွားပါတယ်။ ခဏနေမှ ပြန်စမ်းပါ။'
-      );
-    } catch (sendError) {
-      console.error('Unable to send error:', sendError.message);
+    // Do not send error messages for ordinary group chat.
+    // Only send an error if the original message contained an ID.
+    const hasId = /(\d{5,12})\s*[\(（]\s*(\d{3,6})\s*[\)）]/.test(text);
+
+    if (hasId) {
+      try {
+        await bot.sendMessage(
+          chatId,
+          '💔 ID စစ်ဆေးရာတွင် အမှားဖြစ်နေပါတယ်။ ခဏနေမှ ပြန်စမ်းပါ။'
+        );
+      } catch (sendError) {
+        console.error('Unable to send error:', sendError.message);
+      }
     }
   }
 });
 
 // ==================================================
-// Handle confirmation button
+// Confirmation button
 // ==================================================
 
-bot.on('callback_query', async (query) => {
+bot.on('callback_query', async query => {
   const callbackData = query.data || '';
 
   try {
@@ -395,7 +416,8 @@ bot.on('callback_query', async (query) => {
     const [, gameId, zoneId, ownerIdText] = parts;
     const ownerId = Number(ownerIdText);
 
-    // Only the person who submitted the ID can confirm it.
+    // Keep existing behavior: only the person who submitted
+    // this ID can confirm it.
     if (query.from.id !== ownerId) {
       await bot.answerCallbackQuery(query.id, {
         text: 'ဒီ ID ကို ပို့ခဲ့သူသာ အတည်ပြုနိုင်ပါတယ်။',
@@ -405,12 +427,11 @@ bot.on('callback_query', async (query) => {
     }
 
     await bot.answerCallbackQuery(query.id, {
-      text: '💜 ID အတည်ပြုပြီးပါပြီ။'
+      text: '🩵 ID အတည်ပြုပြီးပါပြီ။'
     });
 
     if (!query.message) return;
 
-    // Re-fetch details so the confirmation keeps real values.
     const result = await fetchMlbbData(gameId, zoneId);
 
     if (!result.success) {
@@ -428,8 +449,8 @@ bot.on('callback_query', async (query) => {
       region: result.region
     });
 
-    // Confirmation removes the confirm button.
-    // Copy buttons remain available.
+    // Confirmation button is removed.
+    // Copy ID and Copy Zone buttons remain.
     await bot.editMessageText(output, {
       chat_id: query.message.chat.id,
       message_id: query.message.message_id,
@@ -467,11 +488,11 @@ const server = app.listen(PORT, '0.0.0.0', async () => {
   }
 });
 
-process.on('unhandledRejection', (error) => {
+process.on('unhandledRejection', error => {
   console.error('Unhandled rejection:', error);
 });
 
-process.on('uncaughtException', (error) => {
+process.on('uncaughtException', error => {
   console.error('Uncaught exception:', error);
   process.exit(1);
 });
